@@ -223,10 +223,11 @@ $users = $conn->query("
                                                 class="text-<?php echo $user['is_active'] ? 'red' : 'green'; ?>-600 hover:text-<?php echo $user['is_active'] ? 'red' : 'green'; ?>-900">
                                             <?php echo $user['is_active'] ? 'Desactivar' : 'Activar'; ?>
                                         </button>
-                                        <button onclick="viewUserDetails(<?php echo $user['id']; ?>)"
-                                                class="ml-3 text-primary hover:text-blue-600">
+                                        <a href="user_details.php?id=<?php echo $user['id']; ?>"
+                                           class="ml-3 text-primary hover:text-blue-600">
+                                            <i class="fas fa-info-circle mr-1"></i>
                                             Detalles
-                                        </button>
+                                        </a>
                                     </td>
                                 </tr>
                                 <?php endforeach; ?>
@@ -267,11 +268,6 @@ $users = $conn->query("
             if (confirm('¿Está seguro de que desea cambiar el estado de este usuario?')) {
                 window.location.href = `users.php?toggle_status=${userId}`;
             }
-        }
-
-        function viewUserDetails(userId) {
-            // Implementar vista de detalles del usuario
-            alert('Funcionalidad de detalles en desarrollo');
         }
     </script>
 </body>
