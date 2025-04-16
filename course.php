@@ -133,17 +133,28 @@ $videos = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
 
     <!-- Main Content -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <?php if ($error): ?>
-            <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
-                <span class="block sm:inline"><?php echo $error; ?></span>
-            </div>
-        <?php endif; ?>
+            <?php 
+            // Mostrar mensajes de error, éxito o información
+            if ($error): ?>
+                <div class="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative mb-4" role="alert">
+                    <span class="block sm:inline"><?php echo $error; ?></span>
+                </div>
+            <?php endif; ?>
 
-        <?php if ($success): ?>
-            <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4" role="alert">
-                <span class="block sm:inline"><?php echo $success; ?></span>
-            </div>
-        <?php endif; ?>
+            <?php if ($success): ?>
+                <div class="bg-green-100 border border-green-400 text-green-700 px-4 py-3 rounded relative mb-4" role="alert">
+                    <span class="block sm:inline"><?php echo $success; ?></span>
+                </div>
+            <?php endif; ?>
+
+            <?php if (isset($_GET['message']) && $_GET['message'] === 'video_completed'): ?>
+                <div class="bg-blue-100 border border-blue-400 text-blue-700 px-4 py-3 rounded relative mb-4" role="alert">
+                    <span class="block sm:inline">
+                        <i class="fas fa-check-circle mr-2"></i>
+                        Este video ya ha sido completado. Por favor, continúa con el siguiente video del curso.
+                    </span>
+                </div>
+            <?php endif; ?>
 
         <!-- Redeem Key Form -->
         <div class="bg-white rounded-lg shadow-sm p-6 mb-8">
