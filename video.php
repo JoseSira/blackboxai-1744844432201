@@ -17,9 +17,24 @@ if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
 $video_id = (int)$_GET['id'];
 $user_id = $_SESSION['user_id'];
 
-// Verificar si el usuario tiene acceso al video
-if (!checkVideoAccess($user_id, $video_id)) {
+// Verificar si el usuario tiene acceso al video y si ya está completado
+$stmt = $conn->prepare("
+    SELECT is_completed 
+    FROM user_video_access 
+    WHERE user_id = ? AND video_id = ?
+");
+$stmt->bind_param("ii", $user_id, $video_id);
+$stmt->execute();
+$result = $stmt->get_result();
+
+if ($result->num_rows === 0) {
     header('Location: dashboard.php');
+    exit();
+}
+
+$access = $result->fetch_assoc();
+if ($access['is_completed']) {
+    header('Location: course.php?id=' . $_GET['course_id'] . '&message=video_completed');
     exit();
 }
 
