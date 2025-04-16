@@ -14,33 +14,133 @@ $error = '';
 // Obtener todos los cursos para el selector
 $courses = $conn->query("SELECT id, title FROM courses ORDER BY title")->fetch_all(MYSQLI_ASSOC);
 
-// Procesar formulario de subida de video
+// Crear directorio para videos si no existe
+$upload_dir = '../uploads/videos/';
+if (!file_exists($upload_dir)) {
+    mkdir($upload_dir, 0777, true);
+}
+
+// Procesar eliminación de video
+if (isset($_GET['delete']) && is_numeric($_GET['delete'])) {
+    $video_id = (int)$_GET['delete'];
+    
+    // Obtener información del video antes de eliminar
+    $stmt = $conn->prepare("SELECT video_url FROM episodes WHERE id = ?");
+    $stmt->bind_param("i", $video_id);
+    $stmt->execute();
+    $video = $stmt->get_result()->fetch_assoc();
+    
+    // Eliminar el archivo si es local
+    if ($video && strpos($video['video_url'], 'uploads/videos/') !== false) {
+        @unlink($_SERVER['DOCUMENT_ROOT'] . '/' . $video['video_url']);
+    }
+    
+    // Eliminar registro de la base de datos
+    $stmt = $conn->prepare("DELETE FROM episodes WHERE id = ?");
+    $stmt->bind_param("i", $video_id);
+    
+    if ($stmt->execute()) {
+        $success = 'Video eliminado exitosamente';
+    } else {
+        $error = 'Error al eliminar el video';
+    }
+}
+
+// Procesar formulario de subida o edición de video
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $course_id = sanitizeInput($_POST['course_id']);
     $title = sanitizeInput($_POST['title']);
     $description = sanitizeInput($_POST['description']);
-    $video_url = sanitizeInput($_POST['video_url']);
     $episode_number = (int)$_POST['episode_number'];
+    $video_id = isset($_POST['video_id']) ? (int)$_POST['video_id'] : null;
 
-    if (empty($course_id) || empty($title) || empty($video_url) || empty($episode_number)) {
-        $error = 'Todos los campos son obligatorios';
+    // Validar campos básicos
+    if (empty($course_id) || empty($title) || empty($episode_number)) {
+        $error = 'Los campos título y número de episodio son obligatorios';
     } else {
-        // Verificar si ya existe un video con ese número de episodio en el curso
-        $stmt = $conn->prepare("SELECT id FROM episodes WHERE course_id = ? AND episode_number = ?");
-        $stmt->bind_param("ii", $course_id, $episode_number);
-        $stmt->execute();
+        $video_url = '';
         
-        if ($stmt->get_result()->num_rows > 0) {
-            $error = 'Ya existe un video con ese número de episodio en este curso';
-        } else {
-            // Insertar nuevo video
-            $stmt = $conn->prepare("INSERT INTO episodes (course_id, episode_number, title, description, video_url) VALUES (?, ?, ?, ?, ?)");
-            $stmt->bind_param("iisss", $course_id, $episode_number, $title, $description, $video_url);
+        // Procesar archivo subido
+        if (isset($_FILES['video_file']) && $_FILES['video_file']['size'] > 0) {
+            $file = $_FILES['video_file'];
+            $file_extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+            $allowed_extensions = ['mp4', 'webm', 'ogg'];
             
-            if ($stmt->execute()) {
-                $success = 'Video agregado exitosamente';
+            if (!in_array($file_extension, $allowed_extensions)) {
+                $error = 'Formato de archivo no permitido. Use MP4, WebM o OGG.';
+            } elseif ($file['size'] > 500000000) { // 500MB límite
+                $error = 'El archivo es demasiado grande. Máximo 500MB.';
             } else {
-                $error = 'Error al agregar el video';
+                $filename = uniqid() . '.' . $file_extension;
+                $filepath = $upload_dir . $filename;
+                
+                if (move_uploaded_file($file['tmp_name'], $filepath)) {
+                    $video_url = 'uploads/videos/' . $filename;
+                } else {
+                    $error = 'Error al subir el archivo';
+                }
+            }
+        } elseif (!empty($_POST['video_url'])) {
+            $video_url = sanitizeInput($_POST['video_url']);
+        } elseif (!$video_id) {
+            $error = 'Debe proporcionar un video (archivo o URL)';
+        }
+
+        if (empty($error)) {
+            // Verificar duplicado de número de episodio
+            $stmt = $conn->prepare("
+                SELECT id FROM episodes 
+                WHERE course_id = ? AND episode_number = ? 
+                AND id != COALESCE(?, 0)
+            ");
+            $stmt->bind_param("iii", $course_id, $episode_number, $video_id);
+            $stmt->execute();
+            
+            if ($stmt->get_result()->num_rows > 0) {
+                $error = 'Ya existe un video con ese número de episodio en este curso';
+            } else {
+                if ($video_id) {
+                    // Actualizar video existente
+                    $query = "UPDATE episodes SET 
+                             course_id = ?, 
+                             episode_number = ?, 
+                             title = ?, 
+                             description = ?";
+                    $params = [$course_id, $episode_number, $title, $description];
+                    $types = "iiss";
+                    
+                    if ($video_url) {
+                        $query .= ", video_url = ?";
+                        $params[] = $video_url;
+                        $types .= "s";
+                    }
+                    
+                    $query .= " WHERE id = ?";
+                    $params[] = $video_id;
+                    $types .= "i";
+                    
+                    $stmt = $conn->prepare($query);
+                    $stmt->bind_param($types, ...$params);
+                    
+                    if ($stmt->execute()) {
+                        $success = 'Video actualizado exitosamente';
+                    } else {
+                        $error = 'Error al actualizar el video';
+                    }
+                } else {
+                    // Insertar nuevo video
+                    $stmt = $conn->prepare("
+                        INSERT INTO episodes (course_id, episode_number, title, description, video_url) 
+                        VALUES (?, ?, ?, ?, ?)
+                    ");
+                    $stmt->bind_param("iisss", $course_id, $episode_number, $title, $description, $video_url);
+                    
+                    if ($stmt->execute()) {
+                        $success = 'Video agregado exitosamente';
+                    } else {
+                        $error = 'Error al agregar el video';
+                    }
+                }
             }
         }
     }
@@ -202,12 +302,24 @@ $videos = $conn->query("
                             </div>
 
                             <div class="md:col-span-2">
-                                <label for="video_url" class="block text-sm font-medium text-gray-700 mb-2">
-                                    URL del Video
+                                <label class="block text-sm font-medium text-gray-700 mb-2">
+                                    Video
                                 </label>
-                                <input type="url" id="video_url" name="video_url" required
-                                    class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
-                                    placeholder="https://example.com/video.mp4">
+                                <div class="flex items-center space-x-4">
+                                    <div class="flex-1">
+                                        <input type="file" id="video_file" name="video_file" accept="video/*"
+                                            class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm">
+                                    </div>
+                                    <span class="text-gray-500">O</span>
+                                    <div class="flex-1">
+                                        <input type="url" id="video_url" name="video_url"
+                                            class="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-primary focus:border-primary sm:text-sm"
+                                            placeholder="https://example.com/video.mp4">
+                                    </div>
+                                </div>
+                                <p class="mt-2 text-sm text-gray-500">
+                                    Sube un archivo de video o proporciona una URL. Formatos permitidos: MP4, WebM, OGG
+                                </p>
                             </div>
                         </div>
 
@@ -291,7 +403,6 @@ $videos = $conn->query("
             const episodeNumber = document.getElementById('episode_number');
             
             if (courseId) {
-                // Realizar petición AJAX para obtener el último número de episodio del curso
                 fetch(`get_last_episode.php?course_id=${courseId}`)
                     .then(response => response.json())
                     .then(data => {
@@ -301,16 +412,81 @@ $videos = $conn->query("
             }
         });
 
+        // Variables globales para los modales
+        let currentVideoUrl = '';
+        const previewModal = document.getElementById('previewModal');
+        const editModal = document.getElementById('editModal');
+        const previewPlayer = document.getElementById('previewPlayer');
+
+        // Funciones para el modal de vista previa
+        function previewVideo(videoUrl) {
+            previewPlayer.src = videoUrl;
+            previewModal.classList.remove('hidden');
+            previewPlayer.load();
+        }
+
+        function closePreviewModal() {
+            previewPlayer.pause();
+            previewPlayer.src = '';
+            previewModal.classList.add('hidden');
+        }
+
+        // Funciones para el modal de edición
         function editVideo(video) {
-            // Implementar edición de video
-            alert('Funcionalidad de edición en desarrollo');
+            document.getElementById('edit_video_id').value = video.id;
+            document.getElementById('edit_course_id').value = video.course_id;
+            document.getElementById('edit_episode_number').value = video.episode_number;
+            document.getElementById('edit_title').value = video.title;
+            document.getElementById('edit_description').value = video.description;
+            
+            // Mostrar video actual
+            currentVideoUrl = video.video_url;
+            const videoContainer = document.getElementById('current_video_container');
+            videoContainer.querySelector('span').textContent = video.video_url.split('/').pop();
+            
+            editModal.classList.remove('hidden');
+        }
+
+        function closeEditModal() {
+            document.getElementById('editForm').reset();
+            editModal.classList.add('hidden');
+        }
+
+        function previewCurrentVideo() {
+            if (currentVideoUrl) {
+                previewVideo(currentVideoUrl);
+            }
         }
 
         function deleteVideo(videoId) {
-            if (confirm('¿Está seguro de que desea eliminar este video?')) {
+            if (confirm('¿Está seguro de que desea eliminar este video? Esta acción no se puede deshacer.')) {
                 window.location.href = `upload_video.php?delete=${videoId}`;
             }
         }
+
+        // Cerrar modales al hacer clic fuera de ellos
+        window.onclick = function(event) {
+            if (event.target === previewModal) {
+                closePreviewModal();
+            }
+            if (event.target === editModal) {
+                closeEditModal();
+            }
+        }
+
+        // Validación de formularios
+        document.querySelectorAll('form').forEach(form => {
+            form.addEventListener('submit', function(e) {
+                const videoFile = this.querySelector('input[type="file"]');
+                const videoUrl = this.querySelector('input[type="url"]');
+                
+                if (!this.querySelector('input[name="video_id"]') && // Si no es edición
+                    !videoFile.files.length && !videoUrl.value) {
+                    e.preventDefault();
+                    alert('Debe proporcionar un video (archivo o URL)');
+                }
+            });
+        });
     </script>
 </body>
 </html>
